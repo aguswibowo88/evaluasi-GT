@@ -694,6 +694,10 @@ window.PRESENTATION_DATA = {"source_file": "DATA E-COM.xlsx", "top_platform": {"
       trend.forecast = forecast;
       trend.last_actual_label = latestLabel;
       trend.last_actual_value = latestValue;
+      trend.last_actual_text = IDR.format(latestValue);
+      trend.forecast_label = nextLabel;
+      trend.forecast_value = Math.round(forecastValue);
+      trend.forecast_text = IDR.format(Math.round(forecastValue));
       trend.growth_pct = latestValue > 0 ? Math.round((forecastValue / latestValue - 1) * 100) : storedGrowth;
       setText("heroYtd", "Confidential · YTD " + latestMonthName + " " + latestYear + " · Holt-Winters Outlook");
       setText("heroRange", "Analisis Historis (" + firstLabel + " - " + latestMonthShort + " " + latestYear + ") & Prediksi Strategis");
