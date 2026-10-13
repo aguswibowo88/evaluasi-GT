@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 SRC = Path(r"D:\E-COMM\EVALUASI & ANALISA\DATA E-COM.xlsx")
-URL = "https://aguswibowo88.github.io/evaluasi-ecom/"
+URL = "https://aguswibowo88.github.io/evaluasi-gt/"
 BTN_NAME = "btnTombolAnalisa"
 LABEL = "TOMBOL ANALISA"
 

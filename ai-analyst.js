@@ -88,7 +88,58 @@
     if (host === "127.0.0.1" || host === "localhost" || host.endsWith("workers.dev")) {
       return new URL("api/analyst", location.href).href;
     }
-    return "https://evaluasi-ecom.8-aguswibowo.workers.dev/api/analyst";
+    return "";
+  }
+
+  async function kpiContext() {
+    if (window.SHEET_READY && typeof window.SHEET_READY.then === "function") {
+      try { await window.SHEET_READY; } catch (error) { /* tampilan tetap memakai data yang sudah termuat */ }
+    }
+    const data = window.PRESENTATION_DATA || {};
+    return {
+      source: data.source_file || "Google Sheet GT",
+      top_platform: data.top_platform,
+      top_brand: data.top_brand,
+      top_item: data.top_item,
+      trend: data.trend,
+      platforms: data.platforms,
+      brands: data.brands,
+    };
+  }
+
+  function reportFromKpi(context) {
+    const platform = context.top_platform || {};
+    const brand = context.top_brand || {};
+    const item = context.top_item || {};
+    const trend = context.trend || {};
+    const growth = Number(trend.growth_pct);
+    const growthText = Number.isFinite(growth) ? (growth > 0 ? "+" : "") + growth + "%" : "";
+    return {
+      summary: "Kanal utama " + (platform.name || "-") + " " + (platform.label || "") + ". Merek utama " + (brand.name || "-") + " " + (brand.label || "") + ". Item utama " + (item.name || "-") + " " + (item.label || "") + ".",
+      key_findings: [
+        "Kanal teratas: " + (platform.name || "-") + " (" + (platform.label || "-") + ").",
+        "Merek teratas: " + (brand.name || "-") + " (" + (brand.label || "-") + ").",
+        "Item teratas: " + (item.name || "-") + " (" + (item.label || "-") + ").",
+      ],
+      trend_analysis: "Periode terakhir " + (trend.last_actual_label || "-") + " sebesar " + (trend.last_actual_text || "-") + ". Proyeksi " + (trend.forecast_label || "bulan depan") + " " + (trend.forecast_text || "") + (growthText ? " (" + growthText + ")." : "."),
+      platform_analysis: (context.platforms || []).map((row) => row.name + " " + row.pct + "%").join(", ") || "Belum ada kontribusi kanal.",
+      brand_analysis: (context.brands || []).map((row) => row.name + " " + (row.label || "")).join(", ") || "Belum ada merek.",
+      product_analysis: "Item dengan omset tahun berjalan tertinggi: " + (item.name || "-") + " " + (item.label || "") + ".",
+      anomalies: ["Tidak ditemukan anomali yang signifikan berdasarkan data yang tersedia."],
+      possible_explanations: ["Angka dihitung dari pesanan berstatus DIKIRIM pada Google Sheet GT."],
+      recommendations: ["Jaga stok item teratas dan kurangi ketergantungan pada satu kanal."],
+    };
+  }
+
+  function answerFromKpi(text, context) {
+    const platform = context.top_platform || {};
+    const brand = context.top_brand || {};
+    const item = context.top_item || {};
+    const value = String(text || "").toLowerCase();
+    if (/merek|brand/.test(value)) return "Merek utama tahun berjalan adalah " + (brand.name || "-") + " dengan omset " + (brand.label || "-") + ".";
+    if (/item|produk|sku/.test(value)) return "Item utama tahun berjalan adalah " + (item.name || "-") + " dengan omset " + (item.label || "-") + ".";
+    if (/kanal|platform|toko|pelanggan/.test(value)) return "Kanal utama tahun berjalan adalah " + (platform.name || "-") + " dengan omset " + (platform.label || "-") + ".";
+    return reportFromKpi(context).summary;
   }
 
   async function run(text, full) {
@@ -104,7 +155,15 @@
       return;
     }
     try {
-      const response = await fetch(analystEndpoint(), {
+      const endpoint = analystEndpoint();
+      if (!endpoint) {
+        const context = await kpiContext();
+        status.textContent = "";
+        if (full) render(reportFromKpi(context));
+        else showAnswer(answerFromKpi(text, context));
+        return;
+      }
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ question: text, full: Boolean(full) }),
@@ -129,7 +188,7 @@
   }
 
   analyze.addEventListener("click", () => {
-    run("Buat analisis eksekutif penjualan e-commerce dari KPI yang tersedia.", true);
+    run("Buat analisis eksekutif penjualan General Trade dari KPI yang tersedia.", true);
   });
 
   form.addEventListener("submit", (event) => {

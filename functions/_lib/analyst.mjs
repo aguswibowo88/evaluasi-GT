@@ -1,4 +1,4 @@
-const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTfecADJc1sJ1H7JBFhqDhvQNdJ7AlDr-PQbD4LEERvEbK9fJXCYTtRl003F_kjkhYyJLaX480p8A_E/pub?output=csv";
+const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT6MnNW3UXvdk1Jjgwmxgba-TdHuH6QLEzzSWz6JlejXZeGARvmzFCg0fysiYuZVUrbp3dycunbXC3e/pub?output=csv";
 const SHEET_TTL_MS = 10 * 60 * 1000;
 const ANSWER_TTL_MS = 30 * 60 * 1000;
 const MODELS = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite"];
@@ -180,8 +180,21 @@ function money(value) {
   return round(value, 0);
 }
 
+function completeRows(rows) {
+  if (!rows.length) return rows;
+  const maxYm = Math.max(...rows.map((row) => row.ym));
+  const today = new Date();
+  const currentYm = today.getFullYear() * 12 + today.getMonth() + 1;
+  if (maxYm !== currentYm) return rows;
+  const byMonth = groupSum(rows, (row) => row.ym);
+  const current = byMonth.get(maxYm);
+  const previous = byMonth.get(maxYm - 1);
+  if (!current || !previous || previous.revenue <= 0 || current.revenue >= previous.revenue * 0.5) return rows;
+  return rows.filter((row) => row.ym !== maxYm);
+}
+
 function buildKpis(parsed) {
-  const rows = parsed.rows;
+  const rows = completeRows(parsed.rows);
   if (!rows.length) throw new Error("Sheet tidak berisi baris omset.");
   const maxYm = Math.max(...rows.map((row) => row.ym));
   const recentStart = maxYm - 11;
@@ -309,6 +322,7 @@ function buildKpis(parsed) {
         : "Sheet tidak memiliki kolom transaksi, sehingga jumlah transaksi dan nilai rata-rata transaksi tidak dihitung.",
       "Tahun berjalan bisa belum setahun penuh. Pertumbuhan YoY tahun terakhir tidak disetahunkan.",
       "Omset hanya dihitung dari baris dengan STAT_PO persis DIKIRIM.",
+      "Bulan berjalan yang omsetnya masih di bawah setengah bulan sebelumnya tidak dipakai sebagai bulan terakhir.",
       "Penjualan, omset, dan omset penjualan sama-sama berarti BRUTTO.",
     ],
     overall: {
@@ -406,7 +420,7 @@ function cacheKey(question, context) {
 }
 
 function scrubLog(value) {
-  return String(value || "").replace(/AIza[\w-]+/g, "[key]").replace(/\s+/g, " ").slice(0, 300);
+  return String(value || "").replace(/AIza[\w-]+/g, "[key]").replace(/AQ\.[\w-]+/g, "[key]").replace(/\s+/g, " ").slice(0, 300);
 }
 
 async function loadKpis() {
