@@ -922,7 +922,8 @@ window.PRESENTATION_DATA = {"source_file": "DATA E-COM.xlsx", "top_platform": {"
               values: yearList.map((year) => Math.round(((years.get(year) || 0) / 1e9) * 1000) / 1000),
             }))
             .filter((item) => item.total > 0)
-            .sort((a, b) => b.total - a.total);
+            .sort((a, b) => b.total - a.total)
+            .slice(0, 6);
           if (!platforms.length || !yearList.length) return;
           const palette = ["#0F766E", "#D4AF37", "#334155"];
           const platformYearGrowthPlugin = {
@@ -1065,6 +1066,7 @@ window.PRESENTATION_DATA = {"source_file": "DATA E-COM.xlsx", "top_platform": {"
             }))
             .filter((item) => item.total > 0)
             .sort((a, b) => b.total - a.total)
+            .slice(0, 5)
             .map((item, index) => ({ ...item, color: palette[item.name] || fallback[index % fallback.length] }));
           const slaTitle = document.getElementById("slaTitle");
           if (slaTitle) slaTitle.textContent = "SERVICE LEVEL INDICATOR (" + years[0] + "-" + years[years.length - 1] + ")";
@@ -1159,9 +1161,7 @@ window.PRESENTATION_DATA = {"source_file": "DATA E-COM.xlsx", "top_platform": {"
             kpiHost.appendChild(card);
           };
           platforms.forEach((item) => {
-            const latest = item.sla[years.length - 1];
-            if (latest == null || latest === 0) return;
-            appendSlaCard(item.name, latest, item.color);
+            appendSlaCard(item.name, item.sla[years.length - 1], item.color);
           });
           let sentAll = 0;
           let grossAll = 0;
