@@ -251,37 +251,118 @@
     };
   }
 
+  const MONTH_TOKEN = {
+    JAN: 1, FEB: 2, MAR: 3, APR: 4, MEI: 5, MAY: 5, JUN: 6, JUL: 7,
+    AGU: 8, AGS: 8, AUG: 8, SEP: 9, OKT: 10, OCT: 10, NOV: 11, DES: 12, DEC: 12,
+  };
+  const MONTH_NAME = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+  function monthNumberFromText(value) {
+    const token = String(value || "").trim().replace(/\./g, "-").split(/[-\s]/)[0].toUpperCase().slice(0, 3);
+    return MONTH_TOKEN[token] || 0;
+  }
+
+  function monthInQuestion(text) {
+    const rules = [
+      [1, /\bjanuari\b|\bjan\b/],
+      [2, /\bfebruari\b|\bfeb\b/],
+      [3, /\bmaret\b|\bmar\b/],
+      [4, /\bapril\b|\bapr\b/],
+      [5, /\bmei\b/],
+      [6, /\bjuni\b|\bjun\b/],
+      [7, /\bjuli\b|\bjul\b/],
+      [8, /\bagustus\b|\bagu\b|\bags\b/],
+      [9, /\bseptember\b|\bsep\b/],
+      [10, /\boktober\b|\bokt\b/],
+      [11, /\bnovember\b|\bnov\b/],
+      [12, /\bdesember\b|\bdes\b/],
+    ];
+    const hit = rules.find((rule) => rule[1].test(text));
+    return hit ? hit[0] : 0;
+  }
+
+  function monthBuckets(rows) {
+    const map = new Map();
+    rows.forEach((row) => {
+      const month = monthNumberFromText(row.month) || (Number(row.ym) ? ((Number(row.ym) - 1) % 12) + 1 : 0);
+      const year = Number(row.year) || 0;
+      if (!month || !year) return;
+      const key = year * 12 + month;
+      const current = map.get(key) || { year, month, amount: 0 };
+      current.amount += Number(row.amount) || 0;
+      map.set(key, current);
+    });
+    return [...map.values()].sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
+  }
+
+  function scopeLabel(years, month) {
+    const monthName = month ? MONTH_NAME[month] + " " : "";
+    if (years.length === 1) return monthName + "tahun " + years[0];
+    if (years.length > 1) return monthName + "tahun " + years.join(" dan ");
+    return monthName ? monthName.trim() : "seluruh periode di Google Sheet";
+  }
+
   function answerFromSheet(question, rows) {
     const data = shipped(rows);
+    const text = String(question || "").toLowerCase().replace(/[?!.,]/g, " ").replace(/\s+/g, " ").trim();
     const years = yearsInQuestion(question);
-    const scoped = inYears(data, years);
-    const stores = mentioned(question, uniqueNames(data, "platform"));
-    const brands = mentioned(question, uniqueNames(data, "brand"));
-    const items = mentioned(question, uniqueNames(data, "item")).slice(0, 3);
-    const asksWhy = /(mengapa|kenapa|penyebab|why)/.test(String(question || "").toLowerCase());
+    const month = monthInQuestion(text);
+    let scoped = inYears(data, years);
+    if (month) scoped = scoped.filter((row) => monthNumberFromText(row.month) === month || ((Number(row.ym) ? ((Number(row.ym) - 1) % 12) + 1 : 0) === month));
+    const stores = mentioned(question, uniqueNames(data, "platform")).slice(0, 3);
+    const brands = mentioned(question, uniqueNames(data, "brand")).slice(0, 3);
+    const items = mentioned(question, uniqueNames(data, "item")).slice(0, 1);
+    const named = [];
+    stores.forEach((name) => named.push({ label: "toko", name, rows: scoped.filter((row) => row.platform === name) }));
+    brands.forEach((name) => named.push({ label: "merek", name, rows: scoped.filter((row) => row.brand === name) }));
+    items.forEach((name) => named.push({ label: "item", name, rows: scoped.filter((row) => row.item === name) }));
+    const pool = named.length === 1 ? named[0].rows : scoped;
+    const subject = named.length === 1 ? named[0].label + " " + named[0].name + " " : "";
+    const perMonth = /per bulan|tiap bulan|setiap bulan|bulanan|masing masing bulan/.test(text);
+    const asksAverage = /rata/.test(text) || (perMonth && /berapa|total|jumlah/.test(text));
+    const asksTopStore = /(toko|pelanggan|kanal|platform)/.test(text) && /(terbesar|tertinggi|terbanyak|paling|top)/.test(text);
+    const asksTopBrand = /(merek|merk|brand)/.test(text) && /(terbesar|tertinggi|terbanyak|paling|top)/.test(text);
+    const asksTopItem = /(item|produk|sku|barang)/.test(text) && /(terbesar|tertinggi|terbanyak|paling|top)/.test(text);
+    const asksCompare = years.length >= 2 || /(banding|dibanding|versus|\bvs\b)/.test(text);
+    const asksWhy = /(mengapa|kenapa|penyebab)/.test(text);
+    const asksOmset = /omset|penjualan|brutto|revenue/.test(text);
     const parts = [];
-    stores.slice(0, 3).forEach((name) => {
-      parts.push(lineFor("Omset toko", name, total(scoped.filter((row) => row.platform === name)), years));
-    });
-    brands.slice(0, 3).forEach((name) => {
-      parts.push(lineFor("Omset merek", name, total(scoped.filter((row) => row.brand === name)), years));
-    });
-    items.forEach((name) => {
-      parts.push(lineFor("Omset item", name, total(scoped.filter((row) => row.item === name)), years));
-    });
-    if (!parts.length && years.length >= 2) {
-      years.forEach((year) => {
+    const when = scopeLabel(years, month);
+
+    if (asksAverage && (perMonth || /rata/.test(text))) {
+      const buckets = month ? [] : monthBuckets(pool);
+      const sum = total(pool);
+      const count = buckets.length || (sum ? 1 : 0);
+      const average = count ? sum / count : 0;
+      const perMonthText = perMonth ? "per bulan " : "";
+      parts.push("Rata-rata omset " + perMonthText + subject + when + " adalah " + rupiah(average) + ". Total " + rupiah(sum) + " dibagi " + count + " bulan yang tercatat.");
+    } else if (asksTopStore && !named.length) {
+      const top = ranked(scoped, "platform", 5);
+      parts.push("Toko terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
+    } else if (asksTopBrand && !named.length) {
+      const top = ranked(scoped, "brand", 5);
+      parts.push("Merek terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
+    } else if (asksTopItem && !named.length) {
+      const top = ranked(scoped, "item", 5);
+      parts.push("Item terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
+    } else if (asksCompare && !named.length) {
+      const compareYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-2);
+      compareYears.forEach((year) => {
         parts.push("Omset DIKIRIM tahun " + year + " adalah " + rupiah(total(data.filter((row) => row.year === year))) + ".");
       });
+    } else if (named.length) {
+      named.forEach((item) => parts.push(lineFor("Omset " + item.label, item.name, total(item.rows), years)));
+    } else if (asksOmset && (years.length || month)) {
+      parts.push("Omset DIKIRIM " + when + " adalah " + rupiah(total(scoped)) + ".");
+    } else if (perMonth && (years.length || month)) {
+      const buckets = monthBuckets(scoped);
+      parts.push("Omset per bulan " + when + ": " + buckets.map((row) => MONTH_NAME[row.month] + " " + row.year + " " + rupiah(row.amount)).join("; ") + ".");
     }
-    if (!parts.length) {
-      const latestYear = Math.max(...data.map((row) => Number(row.year) || 0));
-      const topStore = ranked(data.filter((row) => row.year === latestYear), "platform", 1)[0];
-      const topBrand = ranked(data.filter((row) => row.year === latestYear), "brand", 1)[0];
-      if (topStore) parts.push("Toko terbesar " + latestYear + " adalah " + topStore[0] + " sebesar " + rupiah(topStore[1]) + ".");
-      if (topBrand) parts.push("Merek terbesar " + latestYear + " adalah " + topBrand[0] + " sebesar " + rupiah(topBrand[1]) + ".");
-    }
+
     if (asksWhy) parts.push("Google Sheet hanya berisi angka penjualan, jadi penyebab di luar data itu tidak dapat ditentukan.");
+    if (!parts.length) {
+      return "Pertanyaan itu belum bisa dijawab dari kolom Google Sheet. Sebutkan tahun, bulan, toko, merek, atau item. Contoh: Berapa rata-rata omset per bulan 2025? " + SOURCE_LINE;
+    }
     parts.push(SOURCE_LINE);
     return parts.join(" ");
   }
