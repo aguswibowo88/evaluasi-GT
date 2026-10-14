@@ -196,7 +196,15 @@
   }
 
   function yearsInQuestion(question) {
-    return [...new Set((String(question || "").match(/\b20\d{2}\b/g) || []).map(Number))];
+    const text = String(question || "").toLowerCase();
+    const found = [...new Set((text.match(/\b20\d{2}\b/g) || []).map(Number))].sort((a, b) => a - b);
+    const span = /(sampai|hingga|s\/d|s\.d|through|\bto\b|–|—|-)/.test(text) || /(tren|trend)/.test(text);
+    if (found.length >= 2 && span && found[found.length - 1] - found[0] <= 8) {
+      const years = [];
+      for (let year = found[0]; year <= found[found.length - 1]; year += 1) years.push(year);
+      return years;
+    }
+    return found;
   }
 
   function inYears(rows, years) {
@@ -216,37 +224,36 @@
 
   function reportFromSheet(rows) {
     const data = shipped(rows);
-    const years = [...new Set(data.map((row) => row.year).filter(Boolean))].sort((a, b) => a - b);
+    const years = [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b);
+    const windowYears = years.slice(-4);
     const latestYear = years[years.length - 1];
-    const priorYear = years.length > 1 ? years[years.length - 2] : null;
-    const ytd = data.filter((row) => row.year === latestYear);
+    const ytd = data.filter((row) => Number(row.year) === latestYear);
     const stores = ranked(ytd, "platform", 6);
     const brands = ranked(ytd, "brand", 4);
     const items = ranked(ytd, "item", 3);
-    const yearly = years.slice(-4).map((year) => year + " " + rupiah(total(data.filter((row) => row.year === year))));
     const latestTotal = total(ytd);
-    const priorTotal = priorYear ? total(data.filter((row) => row.year === priorYear)) : 0;
-    const growth = priorTotal ? Math.round(((latestTotal - priorTotal) / priorTotal) * 1000) / 10 : null;
-    const growthText = growth == null ? "" : " Perubahan dibanding " + priorYear + " " + (growth > 0 ? "naik " : growth < 0 ? "turun " : "sama ") + String(Math.abs(growth)).replace(".", ",") + "%.";
     const leadStore = stores[0] || ["-", 0];
     const leadBrand = brands[0] || ["-", 0];
     const leadItem = items[0] || ["-", 0];
+    const storeShare = shareText(leadStore[1], latestTotal);
+    const brandShare = shareText(leadBrand[1], latestTotal);
+    const narrative = trendAnswer(data, windowYears, "") || ("Omset DIKIRIM " + latestYear + " adalah " + rupiah(latestTotal) + ".");
     return {
-      summary: "Pada " + latestYear + ", toko terbesar adalah " + leadStore[0] + " (" + rupiah(leadStore[1]) + "), merek terbesar " + leadBrand[0] + " (" + rupiah(leadBrand[1]) + "), dan item terbesar " + leadItem[0] + " (" + rupiah(leadItem[1]) + "). " + SOURCE_LINE,
+      summary: narrative + " " + SOURCE_LINE,
       key_findings: [
-        "Omset DIKIRIM " + latestYear + ": " + rupiah(latestTotal) + "." + growthText,
+        "Konsentrasi " + latestYear + ": toko " + leadStore[0] + " menopang " + storeShare + "% dan merek " + leadBrand[0] + " menopang " + brandShare + "% dari omset DIKIRIM.",
         "Toko teratas " + latestYear + ": " + stores.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
         "Merek teratas " + latestYear + ": " + brands.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
       ],
-      trend_analysis: "Omset DIKIRIM per tahun dari Google Sheet: " + yearly.join("; ") + ".",
-      platform_analysis: "Enam toko terbesar " + latestYear + ": " + stores.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
-      brand_analysis: "Merek terbesar " + latestYear + ": " + brands.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
-      product_analysis: "Item terbesar " + latestYear + ": " + items.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
-      anomalies: ["Tidak ditemukan anomali di luar angka yang tercatat pada Google Sheet."],
-      possible_explanations: ["Sheet hanya berisi tahun, bulan, toko, merek, item, status, qty, dan brutto, sehingga penyebab di luar angka penjualan tidak dapat ditentukan."],
+      trend_analysis: narrative,
+      platform_analysis: "Enam toko terbesar " + latestYear + " menopang omset DIKIRIM. Yang terbesar, " + leadStore[0] + ", sebesar " + rupiah(leadStore[1]) + " atau " + storeShare + "% dari tahun itu. Rincian: " + stores.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
+      brand_analysis: "Merek " + leadBrand[0] + " menopang " + brandShare + "% omset DIKIRIM " + latestYear + ". Rincian: " + brands.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
+      product_analysis: "Item terbesar " + latestYear + " adalah " + leadItem[0] + " sebesar " + rupiah(leadItem[1]) + ". Rincian: " + items.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".",
+      anomalies: ["Perbandingan tahun berjalan dengan tahun penuh bisa menyesatkan bila bulan belum lengkap. Bacaan di atas memakai bulan yang sama bila tahun terakhir belum 12 bulan."],
+      possible_explanations: ["Angka hanya menjelaskan apa yang terjadi di penjualan, bukan sebab di luar sheet. Konsentrasi pada satu toko dan satu merek adalah risiko yang terbaca langsung dari porsi omset."],
       recommendations: [
-        "Jaga pasokan " + leadItem[0] + " karena item ini terbesar pada " + latestYear + ".",
-        "Kurangi ketergantungan pada " + leadStore[0] + " bila porsi tokonya terlalu besar.",
+        "Pertahankan pasokan " + leadBrand[0] + " dan item " + leadItem[0] + " karena keduanya menopang omset DIKIRIM " + latestYear + ".",
+        "Jangan menggantungkan target hanya pada " + leadStore[0] + " (porsi " + storeShare + "%). Siapkan toko kedua agar penjualan tidak rapuh bila satu pelanggan melambat.",
       ],
     };
   }
@@ -295,6 +302,65 @@
     return [...map.values()].sort((a, b) => (a.year * 12 + a.month) - (b.year * 12 + b.month));
   }
 
+  function pctChange(current, prior) {
+    if (!prior) return null;
+    return Math.round(((current - prior) / prior) * 1000) / 10;
+  }
+
+  function pctText(value) {
+    if (value == null) return "tidak bisa dibandingkan";
+    const number = String(Math.abs(value)).replace(".", ",");
+    if (value > 0) return "naik " + number + "%";
+    if (value < 0) return "turun " + number + "%";
+    return "sama";
+  }
+
+  function shareText(part, whole) {
+    if (!whole) return "0";
+    return String(Math.round((part / whole) * 1000) / 10).replace(".", ",");
+  }
+
+  function trendAnswer(data, years, subject) {
+    const present = years.filter((year) => data.some((row) => Number(row.year) === year));
+    if (present.length < 2) return "";
+    const series = present.map((year) => {
+      const rows = data.filter((row) => Number(row.year) === year);
+      return { year, amount: total(rows), months: monthBuckets(rows).length, rows };
+    });
+    const first = series[0];
+    const last = series[series.length - 1];
+    const peak = series.reduce((best, row) => (row.amount > best.amount ? row : best), series[0]);
+    const parts = [];
+    parts.push("Tren penjualan " + subject + first.year + "–" + last.year + " dari Google Sheet tidak datar.");
+    series.forEach((row, index) => {
+      const prior = series[index - 1];
+      const change = prior ? " Angka ini " + pctText(pctChange(row.amount, prior.amount)) + " dibanding " + prior.year + "." : "";
+      const partial = row.months && row.months < 12 ? " Tahun " + row.year + " baru tercatat " + row.months + " bulan, jadi belum setahun penuh." : "";
+      parts.push("Tahun " + row.year + " omset DIKIRIM " + rupiah(row.amount) + "." + change + partial);
+    });
+    if (last.months && last.months < 12) {
+      const months = new Set(monthBuckets(last.rows).map((row) => row.month));
+      const sameTotal = (year) => total(data.filter((row) => Number(row.year) === year && months.has(monthNumberFromText(row.month))));
+      const priorYear = series[series.length - 2].year;
+      const currentSame = sameTotal(last.year);
+      const priorSame = sameTotal(priorYear);
+      parts.push("Agar adil, " + last.months + " bulan yang sama dibanding " + priorYear + ": " + rupiah(priorSame) + " menjadi " + rupiah(currentSame) + " (" + pctText(pctChange(currentSame, priorSame)) + ").");
+    }
+    parts.push("Puncak pada rentang ini ada di " + peak.year + " sebesar " + rupiah(peak.amount) + ".");
+    const leadStore = ranked(peak.rows, "platform", 1)[0];
+    const leadBrand = ranked(peak.rows, "brand", 1)[0];
+    if (leadStore && leadBrand) {
+      parts.push("Di tahun puncak, toko " + leadStore[0] + " menopang " + shareText(leadStore[1], peak.amount) + "% dan merek " + leadBrand[0] + " menopang " + shareText(leadBrand[1], peak.amount) + "%.");
+      parts.push("Implikasi strateginya: pertahankan pasokan " + leadBrand[0] + ", dan jangan menggantungkan target pada " + leadStore[0] + " saja karena porsi sebesar itu membuat penjualan rentan bila satu toko melambat.");
+    }
+    const endStore = ranked(last.rows, "platform", 1)[0];
+    const endBrand = ranked(last.rows, "brand", 1)[0];
+    if (endStore && endBrand && last.year !== peak.year) {
+      parts.push("Pada " + last.year + ", penopang utama tetap " + endStore[0] + " (" + shareText(endStore[1], last.amount) + "%) dan " + endBrand[0] + " (" + shareText(endBrand[1], last.amount) + "%).");
+    }
+    return parts.join(" ");
+  }
+
   function scopeLabel(years, month) {
     const monthName = month ? MONTH_NAME[month] + " " : "";
     if (years.length === 1) return monthName + "tahun " + years[0];
@@ -323,13 +389,22 @@
     const asksTopStore = /(toko|pelanggan|kanal|platform)/.test(text) && /(terbesar|tertinggi|terbanyak|paling|top)/.test(text);
     const asksTopBrand = /(merek|merk|brand)/.test(text) && /(terbesar|tertinggi|terbanyak|paling|top)/.test(text);
     const asksTopItem = /(item|produk|sku|barang)/.test(text) && /(terbesar|tertinggi|terbanyak|paling|top)/.test(text);
+    const asksTrend = /(tren|trend|perkembangan|pola penjualan|arah penjualan|kecenderungan)/.test(text);
     const asksCompare = years.length >= 2 || /(banding|dibanding|versus|\bvs\b)/.test(text);
     const asksWhy = /(mengapa|kenapa|penyebab)/.test(text);
     const asksOmset = /omset|penjualan|brutto|revenue/.test(text);
     const parts = [];
     const when = scopeLabel(years, month);
 
-    if (asksAverage && (perMonth || /rata/.test(text))) {
+    if (asksTrend && !named.length) {
+      const trendYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-3);
+      const narrative = trendAnswer(data, trendYears, "");
+      if (narrative) parts.push(narrative);
+    } else if (asksTrend && named.length === 1) {
+      const trendYears = years.length >= 2 ? years : [...new Set(named[0].rows.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b);
+      const narrative = trendAnswer(data.filter((row) => named[0].label === "toko" ? row.platform === named[0].name : named[0].label === "merek" ? row.brand === named[0].name : row.item === named[0].name), trendYears, named[0].label + " " + named[0].name + " ");
+      if (narrative) parts.push(narrative);
+    } else if (asksAverage && (perMonth || /rata/.test(text))) {
       const buckets = month ? [] : monthBuckets(pool);
       const sum = total(pool);
       const count = buckets.length || (sum ? 1 : 0);
@@ -347,9 +422,8 @@
       parts.push("Item terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
     } else if (asksCompare && !named.length) {
       const compareYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-2);
-      compareYears.forEach((year) => {
-        parts.push("Omset DIKIRIM tahun " + year + " adalah " + rupiah(total(data.filter((row) => row.year === year))) + ".");
-      });
+      const narrative = trendAnswer(data, compareYears, "");
+      if (narrative) parts.push(narrative);
     } else if (named.length) {
       named.forEach((item) => parts.push(lineFor("Omset " + item.label, item.name, total(item.rows), years)));
     } else if (asksOmset && (years.length || month)) {
@@ -359,7 +433,12 @@
       parts.push("Omset per bulan " + when + ": " + buckets.map((row) => MONTH_NAME[row.month] + " " + row.year + " " + rupiah(row.amount)).join("; ") + ".");
     }
 
-    if (asksWhy) parts.push("Google Sheet hanya berisi angka penjualan, jadi penyebab di luar data itu tidak dapat ditentukan.");
+    if (asksWhy && !parts.length) {
+      const trendYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-3);
+      const narrative = trendAnswer(named.length === 1 ? named[0].rows : data, trendYears, subject);
+      if (narrative) parts.push(narrative);
+    }
+    if (asksWhy) parts.push("Sheet hanya berisi angka penjualan, jadi sebab di luar data itu tidak dapat ditentukan. Yang dapat dibaca adalah arah omset, bulan yang belum lengkap, dan konsentrasi pada satu toko atau merek.");
     if (!parts.length) {
       return "Pertanyaan itu belum bisa dijawab dari kolom Google Sheet. Sebutkan tahun, bulan, toko, merek, atau item. Contoh: Berapa rata-rata omset per bulan 2025? " + SOURCE_LINE;
     }
