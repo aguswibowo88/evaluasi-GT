@@ -152,7 +152,7 @@
       const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
       if (heading) {
         closeList();
-        const el = document.createElement(heading[1].length === 1 ? "h2" : "h3");
+        const el = document.createElement(heading[1].length >= 3 ? "h3" : "h2");
         renderInline(el, heading[2]);
         root.appendChild(el);
         index += 1;
