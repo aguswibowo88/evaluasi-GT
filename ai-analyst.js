@@ -563,6 +563,73 @@
     return lines.join("\n");
   }
 
+  function changePresentation(data, questionText, years, subject) {
+    const available = [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b);
+    const focus = years.length ? years[years.length - 1] : available[available.length - 1];
+    const prior = available.filter((year) => year < focus).pop();
+    if (!focus || prior == null) return "";
+    const current = data.filter((row) => Number(row.year) === focus);
+    const previous = data.filter((row) => Number(row.year) === prior);
+    const currentMonths = monthBuckets(current);
+    const partial = currentMonths.length > 0 && currentMonths.length < 12;
+    let currentAmount = total(current);
+    let priorAmount = total(previous);
+    let basis = "total tahun";
+    if (partial) {
+      const months = new Set(currentMonths.map((row) => row.month));
+      priorAmount = total(previous.filter((row) => months.has(monthNumberFromText(row.month))));
+      basis = currentMonths.length + " bulan yang sama";
+    }
+    const change = pctChange(currentAmount, priorAmount);
+    const who = subject ? subject.trim() + " " : "";
+    let verdict = "Saya belum bisa menyimpulkan naik atau turunnya, karena pembanding tahun " + prior + " bernilai nol.";
+    if (change != null && change > 0) verdict = "Ya. Omset " + who + "tahun " + focus + " naik dibanding " + prior + ".";
+    else if (change != null && change < 0) verdict = "Tidak. Omset " + who + "tahun " + focus + " tidak naik. Nilainya " + pctText(change) + " dibanding " + prior + ".";
+    else if (change === 0) verdict = "Tidak ada kenaikan. Omset " + who + "tahun " + focus + " sama dengan " + prior + ".";
+    const lines = [
+      "## Apakah omset " + who + focus + " naik?",
+      "",
+      verdict,
+      "",
+      "Kenaikan saya ukur terhadap tahun sebelumnya, yaitu " + prior + ", pada basis " + basis + ".",
+      "",
+      "| Tahun | Omset | Perubahan |",
+      "| --- | --- | --- |",
+      "| " + prior + " | " + rupiah(priorAmount) + " | — |",
+      "| " + focus + " | " + rupiah(currentAmount) + " | " + (change == null ? "tidak bisa dibandingkan" : pctText(change)) + " |",
+    ];
+    const rangeMatch = String(questionText || "").match(/(\d+(?:[.,]\d+)?)\s*%?\s*(?:-|–|—|sampai|hingga)\s*(\d+(?:[.,]\d+)?)\s*%/);
+    if (/harga/.test(questionText) || rangeMatch) {
+      lines.push("");
+      lines.push("### Soal kenaikan harga");
+      lines.push("- Sheet tidak menyimpan harga jual. Skenario harga tidak bisa dibuktikan dari data yang ada.");
+      lines.push("- Yang terukur hanya omset BRUTTO, yaitu nilai penjualan setelah harga yang benar-benar terjadi.");
+      if (rangeMatch && change != null) {
+        const lowText = rangeMatch[1].replace(".", ",");
+        const highText = rangeMatch[2].replace(".", ",");
+        const low = Number(rangeMatch[1].replace(",", "."));
+        const high = Number(rangeMatch[2].replace(",", "."));
+        lines.push("- Asumsi yang Anda sebut adalah harga naik **" + lowText + "%–" + highText + "%** setiap tahun.");
+        if (change > 0 && change < low) {
+          lines.push("- Omset memang naik, tetapi hanya **" + pctText(change) + "**. Itu lebih kecil dari kenaikan harga tersebut. Kalau harga benar naik sebesar itu, jumlah barang yang terjual kemungkinan berkurang. Ini hipotesis, karena kuantitas tidak tercatat.");
+        } else if (change >= low && change <= high) {
+          lines.push("- Besaran kenaikan omset masuk di dalam rentang harga itu. Volume bisa relatif datar. Ini hipotesis, bukan fakta.");
+        } else if (change > high) {
+          lines.push("- Kenaikan omset lebih besar dari skenario harga. Ada kemungkinan volume ikut naik, tetapi itu hipotesis karena kuantitas tidak tercatat.");
+        } else {
+          lines.push("- Omset tidak naik, sementara skenario harga justru naik. Kalau harga benar naik, volume turun lebih dalam. Ini hipotesis, bukan fakta.");
+        }
+      }
+    }
+    lines.push("");
+    lines.push("### Bacaan bisnis");
+    if (change != null && change > 0) lines.push("- Nilai penjualan " + focus + " lebih baik dari " + prior + " pada basis " + basis + ".");
+    else if (change != null && change < 0) lines.push("- Nilai penjualan menyusut. Tahun " + prior + " bukan lagi lantai yang sudah terlewati.");
+    else lines.push("- Tidak ada pertumbuhan nilai penjualan pada basis " + basis + ".");
+    if (partial) lines.push("- Tahun " + focus + " baru " + currentMonths.length + " bulan, jadi saya tidak membandingkannya dengan setahun penuh " + prior + ".");
+    return lines.join("\n");
+  }
+
   function scopeLabel(years, month) {
     const monthName = month ? MONTH_NAME[month] + " " : "";
     if (years.length === 1) return monthName + "tahun " + years[0];
@@ -595,10 +662,21 @@
     const asksCompare = years.length >= 2 || /(banding|dibanding|versus|\bvs\b)/.test(text);
     const asksWhy = /(mengapa|kenapa|penyebab)/.test(text);
     const asksOmset = /omset|penjualan|brutto|revenue/.test(text);
+    const asksChange = !asksTopStore && !asksTopBrand && !asksTopItem && (
+      /(apakah|benarkah)/.test(text)
+      || /(kenaikan omset|omset naik|penjualan naik|mengalami kenaikan|mengalami penurunan|meningkat|pertumbuhan)/.test(text)
+      || (/(^| )(naik|turun)( |$)/.test(text) && (asksOmset || /harga/.test(text)))
+    );
     const parts = [];
     const when = scopeLabel(years, month);
 
-    if (asksTrend && !named.length) {
+    if (asksChange) {
+      const entityRows = named.length === 1
+        ? data.filter((row) => (named[0].label === "toko" ? row.platform === named[0].name : named[0].label === "merek" ? row.brand === named[0].name : row.item === named[0].name))
+        : data;
+      const narrative = changePresentation(entityRows, text, years, subject);
+      if (narrative) parts.push(narrative);
+    } else if (asksTrend && !named.length) {
       const trendYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-3);
       const narrative = trendPresentation(data, trendYears, "");
       if (narrative) parts.push(narrative);
