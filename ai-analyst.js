@@ -61,8 +61,128 @@
     return "";
   }
 
+  function renderInline(parent, text) {
+    const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+    let last = 0;
+    let match = pattern.exec(text);
+    while (match) {
+      if (match.index > last) parent.appendChild(document.createTextNode(text.slice(last, match.index)));
+      if (match[1] != null) {
+        const strong = document.createElement("strong");
+        strong.textContent = match[1];
+        parent.appendChild(strong);
+      } else {
+        const code = document.createElement("code");
+        code.textContent = match[2];
+        parent.appendChild(code);
+      }
+      last = match.index + match[0].length;
+      match = pattern.exec(text);
+    }
+    if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function isTableRow(line) {
+    return /^\s*\|.+\|\s*$/.test(line);
+  }
+
+  function isSeparator(line) {
+    return /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?\s*$/.test(line);
+  }
+
+  function splitCells(line) {
+    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  }
+
+  function renderPresentation(root, source) {
+    root.replaceChildren();
+    const lines = String(source || "").replace(/\r\n/g, "\n").split("\n");
+    let index = 0;
+    let list = null;
+    let listType = "";
+
+    function closeList() {
+      list = null;
+      listType = "";
+    }
+
+    while (index < lines.length) {
+      const trimmed = lines[index].trim();
+      if (!trimmed) {
+        closeList();
+        index += 1;
+        continue;
+      }
+      if (isTableRow(trimmed)) {
+        closeList();
+        const rows = [];
+        while (index < lines.length && isTableRow(lines[index].trim())) {
+          if (!isSeparator(lines[index])) rows.push(splitCells(lines[index]));
+          index += 1;
+        }
+        if (!rows.length) continue;
+        const wrap = document.createElement("div");
+        wrap.className = "ai-table-wrap";
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        rows[0].forEach((cell) => {
+          const th = document.createElement("th");
+          renderInline(th, cell);
+          headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        rows.slice(1).forEach((row) => {
+          const tr = document.createElement("tr");
+          const width = Math.max(rows[0].length, row.length);
+          for (let cell = 0; cell < width; cell += 1) {
+            const td = document.createElement("td");
+            renderInline(td, row[cell] || "");
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        root.appendChild(wrap);
+        continue;
+      }
+      const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+      if (heading) {
+        closeList();
+        const el = document.createElement(heading[1].length === 1 ? "h2" : "h3");
+        renderInline(el, heading[2]);
+        root.appendChild(el);
+        index += 1;
+        continue;
+      }
+      const bullet = /^[-*•]\s+(.+)$/.exec(trimmed);
+      const numbered = /^\d+[.)]\s+(.+)$/.exec(trimmed);
+      if (bullet || numbered) {
+        const type = bullet ? "ul" : "ol";
+        if (!list || listType !== type) {
+          list = document.createElement(type);
+          listType = type;
+          root.appendChild(list);
+        }
+        const li = document.createElement("li");
+        renderInline(li, (bullet || numbered)[1]);
+        list.appendChild(li);
+        index += 1;
+        continue;
+      }
+      closeList();
+      const paragraph = document.createElement("p");
+      renderInline(paragraph, trimmed);
+      root.appendChild(paragraph);
+      index += 1;
+    }
+  }
+
   function showAnswer(text) {
-    answer.textContent = text;
+    renderPresentation(answer, text);
     answerCard.hidden = false;
     report.hidden = true;
     result.hidden = false;
@@ -361,6 +481,88 @@
     return parts.join(" ");
   }
 
+  function cell(value) {
+    return String(value || "").replace(/\|/g, "/");
+  }
+
+  function trendPresentation(data, years, subject) {
+    const present = years.filter((year) => data.some((row) => Number(row.year) === year));
+    if (present.length < 2) return "";
+    const series = present.map((year) => {
+      const rows = data.filter((row) => Number(row.year) === year);
+      return { year, amount: total(rows), months: monthBuckets(rows).length, rows };
+    });
+    const first = series[0];
+    const last = series[series.length - 1];
+    const peak = series.reduce((best, row) => (row.amount > best.amount ? row : best), series[0]);
+    const title = (subject || "penjualan ").trim();
+    const lines = [
+      "## Tren " + title + " " + first.year + "–" + last.year,
+      "",
+      "Arah penjualan tidak datar. Setiap angka adalah BRUTTO pesanan berstatus DIKIRIM.",
+      "",
+      "| Tahun | Omset | Perubahan | Cakupan |",
+      "| --- | --- | --- | --- |",
+    ];
+    series.forEach((row, index) => {
+      const prior = series[index - 1];
+      const change = prior ? pctText(pctChange(row.amount, prior.amount)) : "—";
+      const cover = row.months && row.months < 12 ? row.months + " bulan" : "setahun";
+      lines.push("| " + row.year + " | " + rupiah(row.amount) + " | " + change + " | " + cover + " |");
+    });
+    if (last.months && last.months < 12) {
+      const months = new Set(monthBuckets(last.rows).map((row) => row.month));
+      const sameTotal = (year) => total(data.filter((row) => Number(row.year) === year && months.has(monthNumberFromText(row.month))));
+      const priorYear = series[series.length - 2].year;
+      const currentSame = sameTotal(last.year);
+      const priorSame = sameTotal(priorYear);
+      lines.push("");
+      lines.push("### Perbandingan bulan yang sama");
+      lines.push("- " + last.months + " bulan yang sama dibanding " + priorYear + ": **" + rupiah(priorSame) + "** menjadi **" + rupiah(currentSame) + "** (" + pctText(pctChange(currentSame, priorSame)) + ").");
+      lines.push("- Tahun " + last.year + " belum setahun penuh, jadi total tahun tidak dibanding setahun penuh.");
+    }
+    lines.push("");
+    lines.push("### Penopang");
+    lines.push("- Puncak rentang ini ada di **" + peak.year + "** sebesar **" + rupiah(peak.amount) + "**.");
+    const leadStore = ranked(peak.rows, "platform", 1)[0];
+    const leadBrand = ranked(peak.rows, "brand", 1)[0];
+    if (leadStore && leadBrand) {
+      lines.push("- Di tahun puncak, toko **" + leadStore[0] + "** menopang **" + shareText(leadStore[1], peak.amount) + "%** dan merek **" + leadBrand[0] + "** menopang **" + shareText(leadBrand[1], peak.amount) + "%**.");
+    }
+    const endStore = ranked(last.rows, "platform", 1)[0];
+    const endBrand = ranked(last.rows, "brand", 1)[0];
+    if (endStore && endBrand && last.year !== peak.year) {
+      lines.push("- Pada " + last.year + ", penopang utama tetap **" + endStore[0] + "** (" + shareText(endStore[1], last.amount) + "%) dan **" + endBrand[0] + "** (" + shareText(endBrand[1], last.amount) + "%).");
+    }
+    lines.push("");
+    lines.push("### Implikasi");
+    if (leadStore && leadBrand) {
+      lines.push("- Pertahankan pasokan **" + leadBrand[0] + "**.");
+      lines.push("- Jangan menggantungkan target hanya pada **" + leadStore[0] + "**, karena porsi itu membuat penjualan rentan bila satu toko melambat.");
+    } else {
+      lines.push("- Baca puncak dan tahun berjalan secara terpisah bila cakupan bulannya belum sama.");
+    }
+    return lines.join("\n");
+  }
+
+  function rankPresentation(title, label, rows, whole) {
+    const lines = [
+      "## " + title,
+      "",
+      "| Peringkat | " + label + " | Omset | Porsi |",
+      "| --- | --- | --- | --- |",
+    ];
+    rows.forEach((row, index) => {
+      lines.push("| " + (index + 1) + " | " + cell(row[0]) + " | " + rupiah(row[1]) + " | " + shareText(row[1], whole) + "% |");
+    });
+    if (rows[0]) {
+      lines.push("");
+      lines.push("### Penekanan");
+      lines.push("- Posisi teratas adalah **" + rows[0][0] + "** sebesar **" + rupiah(rows[0][1]) + "** (" + shareText(rows[0][1], whole) + "%).");
+    }
+    return lines.join("\n");
+  }
+
   function scopeLabel(years, month) {
     const monthName = month ? MONTH_NAME[month] + " " : "";
     if (years.length === 1) return monthName + "tahun " + years[0];
@@ -398,11 +600,11 @@
 
     if (asksTrend && !named.length) {
       const trendYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-3);
-      const narrative = trendAnswer(data, trendYears, "");
+      const narrative = trendPresentation(data, trendYears, "");
       if (narrative) parts.push(narrative);
     } else if (asksTrend && named.length === 1) {
       const trendYears = years.length >= 2 ? years : [...new Set(named[0].rows.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b);
-      const narrative = trendAnswer(data.filter((row) => named[0].label === "toko" ? row.platform === named[0].name : named[0].label === "merek" ? row.brand === named[0].name : row.item === named[0].name), trendYears, named[0].label + " " + named[0].name + " ");
+      const narrative = trendPresentation(data.filter((row) => named[0].label === "toko" ? row.platform === named[0].name : named[0].label === "merek" ? row.brand === named[0].name : row.item === named[0].name), trendYears, named[0].label + " " + named[0].name + " ");
       if (narrative) parts.push(narrative);
     } else if (asksAverage && (perMonth || /rata/.test(text))) {
       const buckets = month ? [] : monthBuckets(pool);
@@ -410,40 +612,70 @@
       const count = buckets.length || (sum ? 1 : 0);
       const average = count ? sum / count : 0;
       const perMonthText = perMonth ? "per bulan " : "";
-      parts.push("Rata-rata omset " + perMonthText + subject + when + " adalah " + rupiah(average) + ". Total " + rupiah(sum) + " dibagi " + count + " bulan yang tercatat.");
+      parts.push([
+        "## Rata-rata omset " + perMonthText + subject + when,
+        "",
+        "**" + rupiah(average) + "**",
+        "",
+        "### Cara baca",
+        "- Total **" + rupiah(sum) + "** dibagi **" + count + "** bulan yang tercatat.",
+        "- Angka ini adalah BRUTTO pesanan berstatus DIKIRIM.",
+      ].join("\n"));
     } else if (asksTopStore && !named.length) {
-      const top = ranked(scoped, "platform", 5);
-      parts.push("Toko terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
+      parts.push(rankPresentation("Toko terbesar " + when, "Toko", ranked(scoped, "platform", 5), total(scoped)));
     } else if (asksTopBrand && !named.length) {
-      const top = ranked(scoped, "brand", 5);
-      parts.push("Merek terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
+      parts.push(rankPresentation("Merek terbesar " + when, "Merek", ranked(scoped, "brand", 5), total(scoped)));
     } else if (asksTopItem && !named.length) {
-      const top = ranked(scoped, "item", 5);
-      parts.push("Item terbesar " + when + " adalah " + top.map((row) => row[0] + " " + rupiah(row[1])).join("; ") + ".");
+      parts.push(rankPresentation("Item terbesar " + when, "Item", ranked(scoped, "item", 5), total(scoped)));
     } else if (asksCompare && !named.length) {
       const compareYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-2);
-      const narrative = trendAnswer(data, compareYears, "");
+      const narrative = trendPresentation(data, compareYears, "");
       if (narrative) parts.push(narrative);
-    } else if (named.length) {
-      named.forEach((item) => parts.push(lineFor("Omset " + item.label, item.name, total(item.rows), years)));
+    } else if (named.length === 1) {
+      const item = named[0];
+      parts.push([
+        "## Omset " + item.label + " " + item.name + yearPhrase(years),
+        "",
+        "**" + rupiah(total(item.rows)) + "**",
+        "",
+        "### Fakta",
+        "- " + lineFor("Omset " + item.label, item.name, total(item.rows), years),
+        "- Angka ini adalah BRUTTO pesanan berstatus DIKIRIM.",
+      ].join("\n"));
+    } else if (named.length > 1) {
+      const lines = ["## Perbandingan omset " + when, "", "| Cakupan | Omset |", "| --- | --- |"];
+      named.forEach((item) => lines.push("| " + cell(item.label + " " + item.name) + " | " + rupiah(total(item.rows)) + " |"));
+      parts.push(lines.join("\n"));
     } else if (asksOmset && (years.length || month)) {
-      parts.push("Omset DIKIRIM " + when + " adalah " + rupiah(total(scoped)) + ".");
+      parts.push([
+        "## Omset DIKIRIM " + when,
+        "",
+        "**" + rupiah(total(scoped)) + "**",
+        "",
+        "### Fakta",
+        "- Nilai ini adalah BRUTTO pesanan berstatus DIKIRIM.",
+        "- Cakupan pertanyaan: " + when + ".",
+      ].join("\n"));
     } else if (perMonth && (years.length || month)) {
       const buckets = monthBuckets(scoped);
-      parts.push("Omset per bulan " + when + ": " + buckets.map((row) => MONTH_NAME[row.month] + " " + row.year + " " + rupiah(row.amount)).join("; ") + ".");
+      const lines = ["## Omset per bulan " + when, "", "| Bulan | Omset |", "| --- | --- |"];
+      buckets.forEach((row) => lines.push("| " + MONTH_NAME[row.month] + " " + row.year + " | " + rupiah(row.amount) + " |"));
+      parts.push(lines.join("\n"));
     }
 
     if (asksWhy && !parts.length) {
       const trendYears = years.length >= 2 ? years : [...new Set(data.map((row) => Number(row.year)).filter(Boolean))].sort((a, b) => a - b).slice(-3);
-      const narrative = trendAnswer(named.length === 1 ? named[0].rows : data, trendYears, subject);
+      const narrative = trendPresentation(named.length === 1 ? named[0].rows : data, trendYears, subject);
       if (narrative) parts.push(narrative);
     }
-    if (asksWhy) parts.push("Sheet hanya berisi angka penjualan, jadi sebab di luar data itu tidak dapat ditentukan. Yang dapat dibaca adalah arah omset, bulan yang belum lengkap, dan konsentrasi pada satu toko atau merek.");
+    if (asksWhy) {
+      parts.push("### Batas analisa\n- Sheet hanya berisi angka penjualan, jadi sebab di luar data itu tidak dapat ditentukan.\n- Yang dapat dibaca adalah arah omset, bulan yang belum lengkap, dan konsentrasi pada satu toko atau merek.");
+    }
     if (!parts.length) {
       return "Pertanyaan itu belum bisa dijawab dari kolom Google Sheet. Sebutkan tahun, bulan, toko, merek, atau item. Contoh: Berapa rata-rata omset per bulan 2025? " + SOURCE_LINE;
     }
-    parts.push(SOURCE_LINE);
-    return parts.join(" ");
+    parts.push("### Sumber\n- " + SOURCE_LINE);
+    return parts.join("\n\n");
   }
 
   async function run(text, full) {

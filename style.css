@@ -290,6 +290,64 @@ html { scroll-behavior: smooth; scroll-padding-top: 6.5rem; }
     .risk-dead td { background: #FEE2E2; color: #7F1D1D; }
     .risk-chart { height: 280px; }
 
+    .ai-deck { color: #334155; }
+    .ai-deck h2 {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: clamp(1.6rem, 3vw, 2.1rem);
+      line-height: 1.15;
+      color: #0F2744;
+    }
+    .ai-deck h3 {
+      margin-top: 1.15rem;
+      font-size: 0.72rem;
+      font-weight: 650;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: #0F766E;
+    }
+    .ai-deck p { margin-top: 0.65rem; line-height: 1.65; }
+    .ai-deck ul,
+    .ai-deck ol {
+      margin-top: 0.55rem;
+      padding-left: 1.15rem;
+      display: grid;
+      gap: 0.45rem;
+    }
+    .ai-deck li { line-height: 1.55; }
+    .ai-deck li::marker { color: #0F766E; }
+    .ai-deck strong { color: #0F2744; font-weight: 650; }
+    .ai-deck code {
+      font-size: 0.86em;
+      background: #F1F5F9;
+      border-radius: 0.35rem;
+      padding: 0.05rem 0.3rem;
+    }
+    .ai-table-wrap {
+      margin-top: 0.9rem;
+      overflow-x: auto;
+      border: 1px solid rgba(15, 39, 68, 0.08);
+      border-radius: 1rem;
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .ai-deck table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 28rem; }
+    .ai-deck th {
+      text-align: left;
+      background: #F0FDFA;
+      color: #0F766E;
+      font-size: 0.72rem;
+      font-weight: 650;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0.75rem 0.9rem;
+      white-space: nowrap;
+    }
+    .ai-deck td {
+      padding: 0.72rem 0.9rem;
+      border-top: 1px solid rgba(15, 39, 68, 0.06);
+      vertical-align: top;
+    }
+    .ai-deck tbody tr:nth-child(even) td { background: rgba(248, 250, 252, 0.9); }
+
     ::-webkit-scrollbar { width: 10px; }
     ::-webkit-scrollbar-track { background: #F4F7FB; }
     ::-webkit-scrollbar-thumb {

@@ -449,8 +449,9 @@ async function loadKpis() {
 
 function systemPrompt() {
   return [
-    "You are an E-Commerce Data Analyst.",
+    "You are a senior Business Analyst (Ahli Analisa Bisnis) for this e-commerce performance review.",
     "Use ONLY the provided backend data. Do not make up numbers.",
+    "Write each text field in Bahasa Indonesia as concise presentation language: lead with the conclusion, then the key number. Each list item is one scannable idea.",
     "Differentiate between factual data and hypothesis.",
     `If data is insufficient to explain a "why", you MUST state: "${INSUFFICIENT}"`,
     "Write the answer in Bahasa Indonesia.",
@@ -482,7 +483,7 @@ function normalizeResult(raw) {
 }
 
 async function askGemini(apiKey, question, context) {
-  const key = cacheKey(question, context);
+  const key = `report:v2:${cacheKey(question, context)}`;
   const cached = answerCache.get(key);
   if (cached && Date.now() < cached.exp) return cached.value;
   const body = {
@@ -577,7 +578,16 @@ function directSalesAnswer(question, kpis) {
   const hits = (kpis.platform_yearly || []).filter((item) => mentionsPlatform(text, item.platform));
   if (hits.length !== 1) return "";
   const revenue = hits[0].revenue_idr[year];
-  return `Omset ${hits[0].platform} tahun ${year} adalah ${formatRupiah(revenue)}. Angka ini adalah BRUTTO pesanan berstatus DIKIRIM. Penjualan, omset, dan omset penjualan memakai nilai yang sama.`;
+  return [
+    `## Omset ${hits[0].platform} ${year}`,
+    "",
+    `**${formatRupiah(revenue)}**`,
+    "",
+    "### Fakta",
+    `- Nilai omset ${hits[0].platform} tahun ${year} adalah **${formatRupiah(revenue)}**.`,
+    "- Angka ini adalah BRUTTO pesanan berstatus DIKIRIM.",
+    "- Penjualan, omset, dan omset penjualan memakai nilai yang sama.",
+  ].join("\n");
 }
 
 function platformLabel(name) {
@@ -594,12 +604,20 @@ function platformLabel(name) {
 
 function answerPrompt() {
   return [
-    "You are an E-Commerce Data Analyst.",
-    "Answer only the user's question in a detailed, conversational Bahasa Indonesia response.",
+    "You are a senior Business Analyst (Ahli Analisa Bisnis) for this e-commerce performance review.",
+    "Answer the user's question directly, comprehensively, and clearly in Bahasa Indonesia.",
+    "Write the answer as a presentation that is easy to scan. Do not write a long essay.",
     "Use ONLY the provided backend data. Do not make up numbers.",
-    "Do not return JSON and do not write a structured report.",
-    "Do not add sections such as Ringkasan, Temuan utama, Tren, Platform, Merek, Produk, Anomali, Kemungkinan penjelasan, or Rekomendasi.",
-    "Differentiate between factual data and hypothesis.",
+    "Do not return JSON.",
+    "Format the answer in Markdown with these rules:",
+    "- Start with one heading that names the topic: ## ...",
+    "- Follow with 1-2 short sentences that state the direct answer.",
+    "- Put the reasoning in ### headings and bullet points (-). Each bullet is one idea. Put every important number, comparison, and conclusion in a bullet.",
+    "- Bold the key figure or conclusion with **...**.",
+    "- When the question compares platforms, years, brands, products, or periods, add a Markdown table. Use a header row and a | --- | separator. Keep the columns few, labeled, and aligned to the question.",
+    "- For analysis, cause, comparison, or action questions, close with ### Implikasi and ### Rekomendasi as short bullets. Skip those sections for a pure fact question.",
+    "- Do not use the fixed report labels Ringkasan, Temuan utama, Tren, Platform, Merek, Produk, Anomali, or Kemungkinan penjelasan unless the user explicitly asks for a full report.",
+    "Differentiate between factual data and hypothesis. Label a hypothesis as hipotesis.",
     `If data is insufficient to explain a "why", you MUST state: "${INSUFFICIENT}"`,
     "Amounts are Indonesian Rupiah. Do not invent transactions or average transaction value when those fields are null.",
     "Penjualan, omset, and omset penjualan all mean BRUTTO. The figures already include only STAT_PO DIKIRIM.",
@@ -608,7 +626,7 @@ function answerPrompt() {
 }
 
 async function askGeminiText(apiKey, question, context) {
-  const key = `text:${cacheKey(question, context)}`;
+  const key = `text:v2:${cacheKey(question, context)}`;
   const cached = answerCache.get(key);
   if (cached && Date.now() < cached.exp) return cached.value;
   const body = {
